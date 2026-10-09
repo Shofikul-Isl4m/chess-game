@@ -1,0 +1,45 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+model User {
+     id  String @id @default(uuid())
+     name  String
+     email String
+     password String
+     rating Int @default(1200)
+     createdAt DateTime @default(now())
+     gameAsWhite Game[] @relation("white")
+     gameAsBlack Game[] @relation("black")
+     
+}
+
+
+model Game {
+    id String @id @default(uuid())
+    whitePlayerId String
+    blackPlayerId String
+    whitePlayer User @relation("white",fields:[whitePlayerId],references:[id])
+    blackPlayer User @relation("black",fields:[blackPlayerId],references:[id] )
+    gameStatus  GameStatus @default(IN_PROGRESS)
+    createdAt  DateTime @default(now())
+    endAt     DateTime? 
+
+}
+
+enum  GameStatus{
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
