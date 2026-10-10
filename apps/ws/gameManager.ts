@@ -7,7 +7,7 @@ import { Game } from "./game";
 export class GameManager {
     public games: Game[];
     public users: WebSocket[];
-    public pendingUser: WebSocket | null;
+    public pendingUser: { user: WebSocket, userId: string } | null;
 
 
 
@@ -18,7 +18,7 @@ export class GameManager {
 
     }
 
-    addUser(user: WebSocket) {
+    addUser(user: WebSocket, userId: string) {
         this.users.push(user);
         user.on("message", (data) => {
 
@@ -35,7 +35,7 @@ export class GameManager {
                     console.log("game initialize")
                 } else {
 
-                    this.pendingUser = user;
+                    this.pendingUser = { user, userId };
                 }
 
             }

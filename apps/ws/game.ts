@@ -3,32 +3,36 @@ import { Chess } from "chess.js";
 
 export class Game {
 
-    public player1: WebSocket;
-    public player2: WebSocket | null;
+    public player1: { user: WebSocket, userId: string };
+    public player2: { user: WebSocket, userId: string } | null;
     public gameId: string;
     public moveCount: number;
     public chess: Chess;
 
-    constructor(player1: WebSocket, player2: WebSocket) {
+    constructor(player1: { user: WebSocket, userId: string }, player2: { user: WebSocket, userId: string }) {
         this.player1 = player1;
         this.player2 = player2;
         this.gameId = crypto.randomUUID();
         this.moveCount = 0;
         this.chess = new Chess();
+        
+       async init(){
+            const game = await createGame(player1.userId, player2.userId)
+        }
 
-        this.player1.send(JSON.stringify({
+        this.player1.user.send(JSON.stringify({
             type: "init_game",
-            color: "white"
+            color: "w"
         }))
 
-        this.player2.send(JSON.stringify({
+        this.player2.user.send(JSON.stringify({
             type: "init_game",
-            color: "black"
+            color: "b"
         }))
 
     }
 
-    makeMove(user: WebSocket, move: { from: string, to: string }) {
+    makeMove(user: WebSocket, move: { from: string, to: string, promotion?: "q" }) {
 
         if (this.moveCount % 2 === 0 && user !== this.player1) {
 
@@ -39,6 +43,22 @@ export class Game {
         }
 
         if (this.chess.isGameOver()) {
+            // Send the game over message to both players
+            this.player1.send(JSON.stringify({
+                type: "game_over",
+                payload: {
+                    winner: this.chess.turn() === "w" ? "black" : "white"
+                }
+            }))
+            this.player2?.send(JSON.stringify({
+                type: "game_over",
+                payload: {
+                    winner: this.chess.turn() === "w" ? "black" : "white"
+                }
+            }))
+            return;
+        }
+        if (this.chess.isCheckmate()) {
             // Send the game over message to both players
             this.player1.send(JSON.stringify({
                 type: "game_over",
@@ -66,8 +86,8 @@ export class Game {
         if (user === this.player1) {
             this.player2?.send(JSON.stringify({
                 type: "move",
-                payload:
-                    move
+                payload: { move }
+
             }))
         }
 
@@ -75,7 +95,7 @@ export class Game {
             this.player1?.send(JSON.stringify({
                 type: "move",
                 payload:
-                    move
+                    { move }
             }))
         }
         this.moveCount++;
