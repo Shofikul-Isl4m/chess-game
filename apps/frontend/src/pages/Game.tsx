@@ -41,6 +41,7 @@ export function Game() {
 
                     }
                     setBoard(chess.board());
+                    break;
                 }
                 case "game_over": {
                     console.log(message.payload.winner)
