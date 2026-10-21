@@ -44,6 +44,10 @@ export function Home() {
                     className="rounded-xl bg-emerald-600 px-10 py-3 text-lg font-semibold text-white shadow-lg shadow-emerald-900/40 transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:ring-offset-2 focus:ring-offset-zinc-900 active:scale-95"
                     onClick={() => navigate("/game")}
                 >Join</button>
+                <button
+                    className="rounded-xl bg-zinc-700 px-10 py-3 text-lg font-semibold text-white shadow-lg shadow-black/40 transition hover:bg-zinc-600 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 focus:ring-offset-zinc-900 active:scale-95"
+                    onClick={() => navigate("/games")}
+                >My Games</button>
             </div>
         </div>
     </div>

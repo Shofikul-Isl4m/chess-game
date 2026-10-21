@@ -9,16 +9,22 @@ export function Game() {
     const [playerColor, setPlayerColor] = useState();
     const [selected, setSelected] = useState()
 
+
     useEffect(() => {
-        const ws = new WebSocket('ws://localhost:8080');
+        const token = localStorage.getItem("token")
+        const ws = new WebSocket(`ws://localhost:8080/?token=${token}`);
         ws.onopen = () => {
             console.log("connected")
             chess.board()
             setSocket(ws);
         }
-        ws.onclose = () => {
-            console.log("disconnected")
+        ws.onclose = (event) => {
+            console.log("disconnected", event.code)
             setSocket(null);
+            if (event.code === 1008) {
+                localStorage.removeItem("token");
+                window.location.href = "/login"
+            }
         }
         ws.onmessage = (event) => {
             const message = JSON.parse(event.data);
@@ -29,6 +35,12 @@ export function Game() {
                     console.log("game initialize");
                     break;
 
+                }
+                case "player_reconnect": {
+                    setPlayerColor(message.payload.color);
+                    chess.load(message.payload.fen);
+                    setBoard(chess.board());
+                    break;
                 }
                 case "move": {
                     console.log(message.payload.move)
@@ -97,10 +109,6 @@ export function Game() {
             tryMove(selected, square);
 
         }
-
-
-
-
 
     }
 
