@@ -1,8 +1,10 @@
 import { WebSocketServer } from 'ws';
 import { GameManager } from './gameManager';
 import jwt from "jsonwebtoken";
+import { connectRedis } from '@repo/redis/redis';
 
 const wss = new WebSocketServer({ port: 8080 });
+await connectRedis();
 
 const gameManager = new GameManager();
 gameManager.recoverGames();

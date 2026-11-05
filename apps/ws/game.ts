@@ -1,11 +1,12 @@
 import type { WebSocket } from "ws";
 import { Chess } from "chess.js";
 import { prisma } from "@repo/db/client";
+import { redis, redisSub } from "@repo/redis/redis";
 
 export class Game {
 
     public player1: { user: WebSocket | null, userId: string };
-    public player2: { user: WebSocket | null, userId: string } | null;
+    public player2: { user: WebSocket | null, userId: string };
     public gameId: string;
     public moveCount: number;
     public chess: Chess;
@@ -17,15 +18,17 @@ export class Game {
         this.moveCount = 0;
         this.chess = new Chess();
 
-        this.player1.user?.send(JSON.stringify({
-            type: "init_game",
-            color: "w"
-        }))
+        // this.player1.user?.send(JSON.stringify({
+        //     type: "init_game",
+        //     color: "w",
+        //     gameId
+        // }))
 
-        this.player2.user?.send(JSON.stringify({
-            type: "init_game",
-            color: "b"
-        }))
+        // this.player2.user?.send(JSON.stringify({
+        //     type: "init_game",
+        //     color: "b",
+        //     gameId
+        // }))
 
     }
     async endGame(winner: string, pgn: string) {
@@ -54,6 +57,15 @@ export class Game {
 
         try {
             this.chess.move(move)
+            redis.publish(`game:channel:${this.gameId}`, JSON.stringify({
+                type: "move",
+                move,
+                senderId: user === this.player1.user ? this.player1.userId : this.player2.userId,
+                gameId: this.gameId,
+                fen: this.chess.fen(),
+                pgn: this.chess.pgn()
+
+            }))
             if (this.chess.isGameOver()) {
                 if (this.chess.isCheckmate()) {
                     let winner = this.chess.turn() === "w" ? "black" : "white"
@@ -63,9 +75,16 @@ export class Game {
                             winner
                         }
                     })
-                    this.endGame(winner, this.chess.pgn())
-                    this.player1.user?.send(payload)
-                    this.player2?.user?.send(payload)
+                    await this.endGame(winner, this.chess.pgn())
+                    const player = user === this.player1.user ? this.player1 : this.player2;
+                    player.user?.send(payload)
+                    redis.publish(`game:channel:${this.gameId}`, JSON.stringify({
+                        type: "game_over",
+                        senderId: player.userId,
+                        reciverId: user === this.player1.user ? this.player2.userId : this.player1.userId,
+                        winner,
+                    }))
+                    // this.player2?.user?.send(payload)
                     return { isGameOver: true, winner }
                 } else if (this.chess.isDraw()) {
                     const winner = "draw"
@@ -75,9 +94,17 @@ export class Game {
                             winner
                         }
                     })
-                    this.endGame(winner, this.chess.pgn())
-                    this.player1.user?.send(payload)
-                    this.player2?.user?.send(payload)
+                    await this.endGame(winner, this.chess.pgn())
+                    const player = user === this.player1.user ? this.player1 : this.player2;
+                    player.user?.send(payload)
+                    redis.publish(`game:channel:${this.gameId}`, JSON.stringify({
+                        type: "game_over",
+                        senderId: player.userId,
+                        reciverId: user === this.player1.user ? this.player2.userId : this.player1.userId,
+                        winner
+                    }))
+                    // this.player1.user?.send(payload)
+                    // this.player2?.user?.send(payload)
                     return {
                         isGameOver: true, winner
                     }
@@ -88,21 +115,21 @@ export class Game {
         }
 
 
-        if (user === this.player1.user) {
-            this.player2?.user?.send(JSON.stringify({
-                type: "move",
-                payload: { move }
+        // if (user === this.player1.user) {
+        //     this.player2?.user?.send(JSON.stringify({
+        //         type: "move",
+        //         payload: { move }
 
-            }))
-        }
+        //     }))
+        // }
 
-        if (user === this.player2?.user) {
-            this.player1.user?.send(JSON.stringify({
-                type: "move",
-                payload:
-                    { move }
-            }))
-        }
+        // if (user === this.player2?.user) {
+        //     this.player1.user?.send(JSON.stringify({
+        //         type: "move",
+        //         payload:
+        //             { move }
+        //     }))
+        // }
         this.moveCount++;
         return { isGameOver: false, winner: null };
 

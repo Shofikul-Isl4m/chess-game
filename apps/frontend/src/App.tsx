@@ -18,9 +18,9 @@ function App() {
     {
       path: "/game",
       element: (
-        <RequireAuth>
-          <Game />
-        </RequireAuth>
+
+        <Game />
+
       ),
     },
     {

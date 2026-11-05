@@ -1,13 +1,49 @@
 import { useEffect, useState } from "react"
 import { Chessboard } from "../components/Chessboard";
 import { Chess, type Square } from "chess.js";
+import { api } from "../lib/api";
 
 export function Game() {
     const [socket, setSocket] = useState(null);
     const [chess, setChess] = useState(new Chess());
     const [board, setBoard] = useState(chess.board());
     const [playerColor, setPlayerColor] = useState();
-    const [selected, setSelected] = useState()
+    const [selected, setSelected] = useState();
+    const [countDown, setCountDown] = useState(null);
+    const [gameId, setGameId] = useState<string | null>(null);
+    const [me, setMe] = useState(null);
+    const [opponent, setOpponent] = useState(null);
+    const [started, setStarted] = useState(false);
+
+
+
+    useEffect(() => {
+        if (countDown == null || countDown < 1) return;
+
+        const interval = setInterval(() => {
+            setCountDown((prev) => {
+                if (prev == 0 || prev < 1) {
+                    clearInterval(interval)
+                    return 0
+                };
+                return prev - 1
+            }
+            )
+        }, 1000)
+
+
+        return () => clearInterval(interval)
+
+    }, [countDown])
+
+    useEffect(() => {
+        async function fetchGameById() {
+            const { data } = await api.get(`game/${gameId}`);
+            setMe(data.game.me)
+            setOpponent(data.game.opponent)
+        }
+        fetchGameById()
+    }, [gameId])
 
 
     useEffect(() => {
@@ -32,14 +68,20 @@ export function Game() {
                 case "init_game": {
                     setPlayerColor(message.color)
                     setBoard(chess.board())
+                    setGameId(message.gameId)
                     console.log("game initialize");
                     break;
 
                 }
-                case "player_reconnect": {
-                    setPlayerColor(message.payload.color);
-                    chess.load(message.payload.fen);
-                    setBoard(chess.board());
+                case "opponent_reconnect": {
+                    alert("oppent reconected")
+                    setCountDown(null);
+                    break;
+                }
+                case "disconnected": {
+                    alert("opponent diconnected")
+                    const second = Math.floor(message.payload.gracePeriodMs / 1000)
+                    setCountDown(second);
                     break;
                 }
                 case "move": {
@@ -56,7 +98,17 @@ export function Game() {
                     break;
                 }
                 case "game_over": {
-                    console.log(message.payload.winner)
+                    console.log(message.payload.winner);
+                    break;
+                }
+                case "me_reconnet": {
+                    if (message.payload.pgn) {
+                        chess.loadPgn(message.payload.pgn);
+                    } else {
+                        chess.load(message.payload.fen)
+                    }
+                    setPlayerColor(message.payload.color);
+                    setBoard(chess.board())
                 }
             }
             console.log("client recive msg", event.data);
@@ -114,22 +166,37 @@ export function Game() {
 
 
 
-    if (!socket) return <div className="flex h-screen items-center justify-center bg-zinc-900 text-lg font-medium text-zinc-400">
-        Connecting...
-    </div>
+    // if (!socket) return <div className="flex h-screen items-center justify-center bg-zinc-900 text-lg font-medium text-zinc-400">
+    //     Connecting...
+    // </div>
 
-    return <div className="flex min-h-screen flex-col items-center justify-center gap-8 bg-gradient-to-br from-zinc-900 via-zinc-800 to-emerald-950 p-6">
-        <h1 className="text-2xl font-bold tracking-wide text-stone-100 sm:text-3xl">Chess Game</h1>
-        <div className="rounded-2xl bg-black/20 p-4 shadow-2xl ring-1 ring-white/10">
-            <Chessboard board={board} onSquareClick={onSquareClick} />
-        </div>
-        <button
-            className="rounded-xl bg-emerald-600 px-8 py-3 text-lg font-semibold text-white shadow-lg shadow-emerald-900/40 transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:ring-offset-2 focus:ring-offset-zinc-900 active:scale-95"
-            onClick={() => {
-                socket.send(JSON.stringify({
-                    type: "init_game"
-                }))
-            }}
-        >Play Now</button>
-    </div>
+
+    return (<>
+        {countDown !== null && (
+            <div className="fixed top-4 left-1/2 -translate-x-1/2 rounded-xl bg-red-900/80 
+         px-6 py-3 text-white text-center backdrop-blur-sm ring-1 ring-red-500/30 z-50">
+                <p className="text-sm text-red-200">Opponent disconnected</p>
+                <p className="text-2xl font-bold tabular-nums">
+                    {countDown > 0 ? `0:${String(countDown).padStart(2, "0")}` : "Forfeited"}
+                </p>
+            </div>
+        )}
+
+        <div className="flex min-h-screen flex-col items-center justify-center gap-8 bg-gradient-to-br from-zinc-900 via-zinc-800 to-emerald-950 p-6">
+            <div className="flex gap-4">
+                <h1 className="text-2xl font-bold tracking-wide text-stone-100 sm:text-3xl">Chess Game</h1>
+                <h1 className="text-2xl font-bold tracking-wide text-stone-100 sm:text-3xl">{me && me.name} VS {opponent && opponent.name}</h1>
+            </div>
+            <div className="rounded-2xl bg-black/20 p-4 shadow-2xl ring-1 ring-white/10">
+                <Chessboard board={board} onSquareClick={onSquareClick} />
+            </div>
+            {!started && <button
+                className="rounded-xl bg-emerald-600 px-8 py-3 text-lg font-semibold text-white shadow-lg shadow-emerald-900/40 transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:ring-offset-2 focus:ring-offset-zinc-900 active:scale-95"
+                onClick={() => {
+                    socket.send(JSON.stringify({
+                        type: "init_game"
+                    }))
+                }}
+            >Play Now</button>}
+        </div> </>)
 }
