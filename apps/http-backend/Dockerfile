@@ -8,12 +8,12 @@ COPY packages/db/package.json ./packages/db/
 
 RUN bun install
 
-FROM oven/bun:1-slim AS runner
+FROM base AS runner
 
-WORKDIR app/
+WORKDIR /app
 
 COPY . .
 
-RUN cd packages/db/ && bunx prsma generate
+RUN cd packages/db/ && bunx prisma generate
 
-CMD ["sh" , "-c" , "cd app/packages/db/ && bunx prisma migrate deploy && cd app/apps/http-backend/ && bun index.ts  "]
+CMD ["sh" , "-c" , "cd /app/packages/db/ && bunx prisma migrate deploy && cd /app/apps/http-backend/ && bun index.ts  "]

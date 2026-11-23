@@ -4,8 +4,8 @@ WORKDIR /app
 COPY package.json bun.lock turbo.json ./
 
 COPY apps/ws/package.json ./apps/ws
-COPY packages/db/package.json ./package/db/
-COPY package/redis/package.json ./package/redis/
+COPY packages/db/package.json ./packages/db/
+COPY packages/redis/package.json ./packages/redis/
 
 RUN bun install --frozen-lockfile
 

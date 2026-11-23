@@ -7,7 +7,7 @@ COPY apps/frontend/package.json ./apps/frontend
 
 RUN bun install --frozen-lockfile
 
-FROM oven/bun:1-slim AS base
+FROM base AS builder
 WORKDIR /app
 
 COPY . .
@@ -18,7 +18,7 @@ FROM nginx:alpine AS runner
 
 COPY --from=builder /app/apps/frontend/dist /usr/share/nginx/html
 
-COPY apps/frontend/ngimx.conf /etc/nginx/conf.d/default.conf
+COPY apps/frontend/nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80 
 

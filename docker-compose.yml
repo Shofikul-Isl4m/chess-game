@@ -27,9 +27,9 @@ services:
         ports:
             - "3000:3000"
         environment:
-            DATABASE_URL:"postgresql://chess:chess_secret@postgres:5432/chess_game"
-            REDIS_URL:"redis://redis:6379"
-            JWT_SECRET:"secret"
+            DATABASE_URL: "postgresql://chess:chess_secret@postgres:5432/chess_game"
+            REDIS_URL: "redis://redis:6379"
+            JWT_SECRET: "secret"
         depends_on:
             - postgres
             - redis
@@ -46,11 +46,11 @@ services:
             REDIS_URL: "redis://redis:6379"
         depends_on:
             - postgres
-            - reis
+            - redis
 
     frontend:
         build:
-            contenxt: .
+            context: .
             dockerfile: apps/frontend/Dockerfile
         container_name: chess_frontend
         ports:
@@ -61,5 +61,5 @@ services:
 
  
 volumes:
-    posgres_data:
+    postgres_data:
     
