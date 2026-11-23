@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Chessboard } from "../components/Chessboard";
 import { Chess, type Square } from "chess.js";
 import { api } from "../lib/api";
+import { Navigate } from "react-router-dom";
 
 export function Game() {
     const [socket, setSocket] = useState(null);
@@ -14,6 +15,7 @@ export function Game() {
     const [me, setMe] = useState(null);
     const [opponent, setOpponent] = useState(null);
     const [started, setStarted] = useState(false);
+    const [gameOver, setGameOver] = useState<{ winner: string } | null>(null);
 
 
 
@@ -98,10 +100,10 @@ export function Game() {
                     break;
                 }
                 case "game_over": {
-                    console.log(message.payload.winner);
+                    setGameOver({ winner: message.payload.winner });
                     break;
                 }
-                case "me_reconnet": {
+                case "me_reconnect": {
                     if (message.payload.pgn) {
                         chess.loadPgn(message.payload.pgn);
                     } else {
@@ -119,6 +121,8 @@ export function Game() {
         }
 
     }, [])
+
+
     function tryMove(from: Square, to) {
         const legal = chess.moves({ square: from, verbose: true }).find(m => m.to === to)
         if (legal) {
@@ -146,7 +150,7 @@ export function Game() {
     const myTurn = playerColor && chess.turn() === playerColor
 
     function onSquareClick(square: any | null) {
-
+        if (gameOver !== null) return;
 
         console.log("inside onsquare click", chess.turn(), playerColor)
 
@@ -172,6 +176,20 @@ export function Game() {
 
 
     return (<>
+
+        {true && (
+            <div className="fixed inset-0  flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                <div className="bg-zinc-900 p-8 rounded-2xl ring-1 ring-white/10 text-center shadow-2xl">
+                    <h2 className="text-3xl font-bold text-stone-100 mb-2">{"resultText"}</h2>
+                    <p className="text-zinc-400 mb-6">Game over</p>
+                    <div className="flex gap-3 justify-center">
+                        <button className="...bg-emerald-600...">Play Again</button>
+                        <button className="...bg-zinc-700...">Back to Home</button>
+                    </div>
+                </div>
+            </div >
+        )
+        }
         {countDown !== null && (
             <div className="fixed top-4 left-1/2 -translate-x-1/2 rounded-xl bg-red-900/80 
          px-6 py-3 text-white text-center backdrop-blur-sm ring-1 ring-red-500/30 z-50">
@@ -198,5 +216,10 @@ export function Game() {
                     }))
                 }}
             >Play Now</button>}
-        </div> </>)
+        </div>
+
+
+
+
+    </>)
 }
