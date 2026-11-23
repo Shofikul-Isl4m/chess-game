@@ -1,0 +1,17 @@
+# Ignore node_modules everywhere (root, apps/ws/node_modules, etc.)
+node_modules
+**/node_modules
+
+# Ignore .env files everywhere
+.env
+**/.env
+.env.*
+**/.env.*
+
+# Ignore build artifacts and git
+dist
+**/dist
+.git
+.gitignore
+*.md
+.kilo
