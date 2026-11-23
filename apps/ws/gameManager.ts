@@ -14,6 +14,7 @@ export class GameManager {
     public pendingUser: { user: WebSocket, userId: string } | null;
     public serverId: string | null;
     public userConnections: Map<string, WebSocket>
+    private subscribedChannels: Set<string>
 
 
 
@@ -24,7 +25,14 @@ export class GameManager {
         this.graceTimers = new Map();
         this.serverId = crypto.randomUUID();
         this.userConnections = new Map()
+        this.subscribedChannels = new Set()
         this.initPubSub();
+        this.startHeartBeat();
+
+        setInterval(() => {
+            this.checkRemoteServer()
+
+        }, 50000);
     }
 
     key(gameId: string, userId: string) {
@@ -32,24 +40,108 @@ export class GameManager {
 
     }
 
-    cancelTimer(gameId: string, userId: string) {
+    async checkRemoteServer() {
+        for (const game of this.games) {
+
+            const raw = await redis.get(`game:${game.gameId}`);
+            if (!raw) continue;
+            const state = JSON.parse(raw);
+
+            const isWhiteLocal = game.player1.user !== null;
+            const isBlackLocal = game.player2.user !== null;
+
+            if (isWhiteLocal && isBlackLocal) continue;
+
+            if (isBlackLocal && !isWhiteLocal) {
+                const remoteServerAlive = await this.isServerAlive(state.whitePlayerServerId);
+                if (!remoteServerAlive) {
+                    this.handleRemoteServerCrash(game.gameId, game.player1.userId, game.player2.userId);
+
+                }
+            }
+
+            if (isWhiteLocal && !isBlackLocal) {
+                const remoteServerAlive = await this.isServerAlive(state.blackPlayerServerId);
+                if (!remoteServerAlive) {
+                    this.handleRemoteServerCrash(game.gameId, game.player2.userId, game.player1.userId);
+
+                }
+            }
+
+        }
+
+    }
+
+    handleRemoteServerCrash(gameId: string, crashUserId: string, localUserId: string) {
+        const key = this.key(gameId, crashUserId);
+        if (this.graceTimers.get(key)) return;
+        this.startGraceTimer(gameId, crashUserId, 90000);
+
+        const localSocket = this.userConnections.get(localUserId);
+        localSocket?.send(JSON.stringify({
+            type: "disconnected",
+        }))
+
+    }
+
+    startHeartBeat() {
+        const sendPing = async () => {
+            try {
+                await redis.set(`server:heartbeat:${this.serverId}`, "alive",
+                    {
+                        EX: 10
+                    })
+            } catch (error) {
+                console.log("failed to send heartbeat: ", error)
+            }
+        }
+        sendPing();
+
+        setInterval(sendPing, 5000);
+
+    }
+
+    async cancelTimer(gameId: string, userId: string) {
         const key = this.key(gameId, userId)
+
         const timer = this.graceTimers.get(key)
         if (timer) {
             clearTimeout(timer);
             this.graceTimers.delete(key)
         }
 
+        await redis.del(`grace:${gameId}:${userId}`)
+
     }
 
     startGraceTimer(gameId: string, userId: string, durationMs: number = 30000) {
         this.cancelTimer(gameId, userId)
         const key = this.key(gameId, userId)
+        redis.set(`grace:${gameId}:${userId}`, Date.now() + durationMs)
 
         const timer = setTimeout(async () => {
             await this.onGraceExpired(gameId, userId)
         }, durationMs);
         this.graceTimers.set(key, timer)
+    }
+    async cleanupOrphanGraces() {
+        const keys = await redis.keys("grace:*");
+        for (const key of keys) {
+            const raw = await redis.get(key);
+            if (!raw) continue;
+
+            const deadline = Number(raw);
+            if (Date.now() >= deadline) {
+                // Key format: grace:<gameId>:<userId>
+                const [, gameId, disconnectedUserId] = key.split(":");
+                if (gameId && disconnectedUserId) {
+                    const raw = await redis.get(`game:${gameId}`);
+                    if (!raw) continue;
+                    const state = JSON.parse(raw)
+                    await this.endGame(state, { winner: null }, "ABANDONED"); //we will move redis.del operations inside endgame
+                }
+            }
+        }
     }
 
     async onGraceExpired(gameId: string, userId: string) {
@@ -134,6 +226,11 @@ export class GameManager {
 
     }
 
+    async isServerAlive(serverId: string): Promise<boolean> {
+        const status = await redis.get(`server:heartbeat:${serverId}`);
+        return status === "alive";
+    }
+
     async crossServerHandler(event: any) {
         switch (event.type) {
             case "move": {
@@ -194,12 +291,12 @@ export class GameManager {
 
                 if (socket && game) {
                     await this.endGame(game, { winner: null }, "ABANDONED");
-                    socket!.send(JSON.stringify(JSON.stringify({
+                    socket!.send(JSON.stringify({
                         type: "game_over",
                         payload: {
                             winner: event.winner
                         }
-                    })))
+                    }))
                     await redis.del(`game:${game.gameId}`);
                     await redis.del(`user:active-game:${game.player1.userId}`)
                     await redis.del(`user:active-game:${game.player2.userId}`)
@@ -264,6 +361,78 @@ export class GameManager {
     }
 
 
+    async initGame(user: WebSocket, userId: string) {
+        const opponentData = await redis.rPop("matchmaking_queue");
+
+        if (opponentData) {
+            const parseData = JSON.parse(opponentData!)
+            const alive = await this.isServerAlive(parseData.serverId)
+            if (alive) {
+                const gameId = await this.createGame(parseData.userId, userId)
+                let game;
+                if (parseData.serverId === this.serverId) {
+                    const socket = this.userConnections.get(parseData.userId)
+                    game = new Game({ user: socket!, userId: parseData.userId, serverId: parseData.serverId }, { user, userId, serverId: this.serverId }, gameId);
+                    redis.publish(`server:events:${parseData.serverId}`, JSON.stringify({
+                        gameId,
+                        senderId: userId,
+                        reciverId: parseData.userId
+                    }))
+                    redisSub.subscribe(`game:channel:${gameId}`, (message) => {
+                        const event = JSON.parse(message);
+                        this.crossServerHandler(event);
+                    })
+                    user.send(JSON.stringify({
+                        type: "init_game",
+                        color: "b",
+                        gameId
+                    }))
+                } else {
+                    game = new Game({ user: null, userId: parseData.userId, serverId: parseData.serverId }, { user, userId, serverId: this.serverId }, gameId);
+                    redis.publish(`server:events:${parseData.serverId}`, JSON.stringify({
+                        gameId,
+                        senderId: userId,
+                        reciverId: parseData.userId
+                    }))
+                    redisSub.subscribe(`game:channel:${gameId}`, (message) => {
+                        const event = JSON.parse(message);
+                        this.crossServerHandler(event);
+                    })
+                    user.send(JSON.stringify({
+                        type: "init_game",
+                        color: "b",
+                        gameId
+                    }))
+                }
+
+                await redis.set(`user:active-game:${parseData.userId}`, gameId)
+                await redis.set(`user:active-game:${userId}`, gameId)
+                await redis.set(`game:${gameId}`, JSON.stringify({
+                    gameId: game.gameId, whitePlayerId: game.player1.userId, whitePlayerServerId: game.player1.serverId, blackPlayerId: game.player2?.userId, blackPlayerServerId: game.player2.serverId
+                    , pgn: game.chess.pgn(), fen: game.chess.fen(), moveCount: game.moveCount
+                }))
+                this.games.push(game)
+                // this.pendingUser = null;
+                console.log("game initialize")
+
+
+            } else {
+                await redis.lPush("matchmaking_queue", JSON.stringify({
+                    serverId: this.serverId, userId
+                }))
+            }
+
+        } else {
+            await redis.lPush("matchmaking_queue", JSON.stringify({
+                serverId: this.serverId, userId
+            }))
+
+        }
+
+    }
+
+
+
 
     addUser(user: WebSocket, userId: string) {
         this.users.push(user);
@@ -273,17 +442,46 @@ export class GameManager {
             const message = JSON.parse(data.toString());
             if (message.type === "init_game") {
                 const activeGameId = await redis.get(`user:active-game:${userId}`)
+
                 let game;
                 if (activeGameId) {
-                    redisSub.subscribe(`game:channel:${activeGameId}`, (message) => {
-                        const event = JSON.parse(message);
-                        this.crossServerHandler(event);
-                    })
+                    const stateStr = await redis.get(`game:${activeGameId}`)
+                    const state = JSON.parse(stateStr!)
+                    const opponentId = state.whitePlayerId === userId ? state.blackPlayerId : state.whitePlayerId;
+
+                    const graceRaw = await redis.get(`grace:${activeGameId}:${opponentId}`);
+                    if (graceRaw) {
+                        const deadline = Number(graceRaw);
+                        const remainingGraceMs = deadline - Date.now();
+                        if (Date.now() >= deadline) {
+                            await this.endGame(state.gameId, {
+                                winner: userId === state.whitePlayerId ? "white" : "black"
+                            }, "COMPLETED")
+                            this.initGame(user, userId) //normal path when no active game in redis
+                            return;
+                        } else {
+                            user.send(JSON.stringify({
+                                type: "disconnected",
+                                payload: {
+                                    gracePeriodMs: remainingGraceMs
+                                }
+
+                            }))
+                        }
+
+                    }
+                    if (!this.subscribedChannels.has(activeGameId)) {
+                        this.subscribedChannels.add(activeGameId);
+                        redisSub.subscribe(`game:channel:${activeGameId}`, (message) => {
+                            const event = JSON.parse(message);
+                            this.crossServerHandler(event);
+                        })
+                    }
                     game = this.games.find((game) => game.gameId === activeGameId)
                     if (!game) {
-                        const stateStr = await redis.get(`game:${activeGameId}`)
-                        const state = JSON.parse(stateStr!)
-                        const whitePlayer = state.whitePlayerId === userId
+
+                        const whitePlayer = state.whitePlayerId === userId;
+
                         if (whitePlayer) {
                             game = new Game({ user, userId }, { user: null, userId: state.blackPlayerId }, activeGameId)
                             if (state.pgn) {
@@ -295,6 +493,7 @@ export class GameManager {
                             user.send(JSON.stringify({
                                 type: "me_reconnect",
                                 payload: {
+                                    pgn: game.chess.pgn(),
                                     fen: game.chess.fen(),
                                     color: game.player1.userId === userId ? "w" : "b"
                                 }
@@ -355,64 +554,7 @@ export class GameManager {
 
                     return;
                 }
-
-                const opponentData = await redis.rPop("matchmaking_queue");
-                if (opponentData) {
-                    const parseData = JSON.parse(opponentData)
-                    const gameId = await this.createGame(parseData.userId, userId)
-                    let game;
-                    if (parseData.serverId === this.serverId) {
-                        const socket = this.userConnections.get(parseData.userId)
-                        game = new Game({ user: socket!, userId: parseData.userId }, { user, userId }, gameId);
-                        redis.publish(`server:events:${parseData.serverId}`, JSON.stringify({
-                            gameId,
-                            senderId: userId,
-                            reciverId: parseData.userId
-                        }))
-                        redisSub.subscribe(`game:channel:${gameId}`, (message) => {
-                            const event = JSON.parse(message);
-                            this.crossServerHandler(event);
-                        })
-                        user.send(JSON.stringify({
-                            type: "init_game",
-                            color: "b",
-                            gameId
-                        }))
-                    } else {
-                        game = new Game({ user: null, userId: parseData.userId }, { user, userId }, gameId);
-                        redis.publish(`server:events:${parseData.serverId}`, JSON.stringify({
-                            gameId,
-                            senderId: userId,
-                            reciverId: parseData.userId
-                        }))
-                        redisSub.subscribe(`game:channel:${gameId}`, (message) => {
-                            const event = JSON.parse(message);
-                            this.crossServerHandler(event);
-                        })
-                        user.send(JSON.stringify({
-                            type: "init_game",
-                            color: "b",
-                            gameId
-                        }))
-                    }
-
-
-
-                    await redis.set(`user:active-game:${parseData.userId}`, gameId)
-                    await redis.set(`user:active-game:${userId}`, gameId)
-                    await redis.set(`game:${gameId}`, JSON.stringify({
-                        gameId: game.gameId, whitePlayerId: game.player1.userId, blackPlayerId: game.player2?.userId,
-                        pgn: game.chess.pgn(), fen: game.chess.fen(), moveCount: game.moveCount
-                    }))
-                    this.games.push(game)
-                    // this.pendingUser = null;
-                    console.log("game initialize")
-                } else {
-                    await redis.lPush("matchmaking_queue", JSON.stringify({
-                        serverId: this.serverId, userId
-                    }))
-
-                }
+                this.initGame(user, userId)
 
             }
             if (message.type === "move") {
